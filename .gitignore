@@ -1,0 +1,5 @@
+# gitignore for C#
+# Based on
+.vs
+bin
+obj
