@@ -26,10 +26,20 @@ namespace InferenceTuning
         [ColumnName("solution")]
         [JsonPropertyName("solution")]
         public string Solution { get; set; }
+
+        [ColumnName("actual")]
+        [JsonPropertyName("actual")]
+        public string Actual { get; set; }
+
+        [ColumnName("candidates")]
+        [JsonPropertyName("candidates")]
+        public string[] Candidates { get; set; }
     }
 
     public class MathOutput : MathInput
     {
         public string PredictedSolution { get; set; }
+
+        public string[] Responses { get; set; }
     }
 }

@@ -1,5 +1,6 @@
 ﻿using Azure.AI.OpenAI;
 using Microsoft.ML.AutoML;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -27,7 +28,13 @@ namespace InferenceTuning
 
         public async Task<TrialResult> RunAsync(TrialSettings settings, CancellationToken ct)
         {
-            var gptOption = settings.Parameter["gpt"].AsType<GPTInferenceSearchSpace>();
+            Log.Information($"Run trial {settings.TrialId}");
+            var gptOption = settings.Parameter["gpt"].AsType<GPTInferenceOption>();
+            Log.Information("Trial parameter:");
+            Log.Information($"Temperature: {gptOption.Temperature}");
+            Log.Information($"TopP: {gptOption.TopP}");
+            Log.Information($"MaxTokens: {gptOption.MaxTokens}");
+            Log.Information($"N: {gptOption.N}");
             var outputSolution = new List<string>();
             var correctCount = 0;
             var totalCount = 0;
@@ -35,13 +42,14 @@ namespace InferenceTuning
             {
                 var chatMessages = new[]
                 {
-                    new ChatMessage(ChatRole.System, "Solve the following math problem, include thought process and wrap the answer in \\boxed{}"),
-                    new ChatMessage(ChatRole.User, input.Problem),
+                    new ChatMessage(ChatRole.System, string.Format(gptOption.PromptTemplate, input.Problem)),
                 };
                 var option = new ChatCompletionsOptions()
                 {
-                    ChoicesPerPrompt = 5,
+                    ChoicesPerPrompt = gptOption.N,
                     Temperature = gptOption.Temperature,
+                    NucleusSamplingFactor = gptOption.TopP,
+                    MaxTokens = gptOption.MaxTokens,
                 };
                 foreach (var chatMessage in chatMessages)
                 {
@@ -50,19 +58,12 @@ namespace InferenceTuning
                 var response = await openAIClient.GetChatCompletionsAsync("chat", option);
 
                 var answers = response.Value.Choices.Select(choice => choice.Message.Content).ToList();
-
                 // print answers
-                var answerInBox = answers.Select(a => Regex.Match(a, @"\\boxed\{(.*)\}").Groups[1].Value).ToList();
-                Console.WriteLine($"answers: {string.Join(", ", answerInBox)}");
-                var answerWithTheMostVote = answerInBox.GroupBy(answer => answer).OrderByDescending(group => group.Count()).First().Key;
-
-                // use regex to extract answer from \\boxed{}
-                // example: blablabla \\boxed{answer} blablabla
+                var answerInBox = answers.Select(a => Regex.Match(a, @"\\boxed\{(.*)\}").Groups[1].Value).ToArray();
                 var correctAnswer = Regex.Match(input.Solution, @"\\boxed\{(.*)\}").Groups[1].Value;
+                var isCorrect = await Utils.IsCorrect(openAIClient, answerInBox, correctAnswer);
 
-                Console.WriteLine($"predict answer: {answerWithTheMostVote}, correct answer: {correctAnswer}");
-
-                if(correctAnswer == answerWithTheMostVote)
+                if(isCorrect)
                 {
                     correctCount++;
                 }
@@ -72,6 +73,7 @@ namespace InferenceTuning
 
             var accuracy = correctCount / (double)totalCount;
 
+            Log.Information($"Trial {settings.TrialId} accuracy: {accuracy}");
             return new TrialResult()
             {
                 Metric = accuracy,

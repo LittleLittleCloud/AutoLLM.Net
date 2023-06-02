@@ -7,11 +7,15 @@
     <Nullable>enable</Nullable>
 	  <UnstableMLNetVersion>0.21.0-preview.23229.1</UnstableMLNetVersion>
 	  <StableMLNetVersion>3.0.0-preview.23229.1</StableMLNetVersion>
+	  <LangVersion>preview</LangVersion>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Azure.AI.OpenAI" Version="1.0.0-beta.5" />
     <PackageReference Include="Microsoft.ML.AutoML" Version="$(UnstableMLNetVersion)" />
+	  <PackageReference Include="Serilog" Version="3.0.0-dev-01998" />
+	  <PackageReference Include="Serilog.Sinks.File" Version="5.0.1-dev-00947" />
+	  <PackageReference Include="Serilog.Sinks.Console" Version="4.1.1-dev-00910" />
   </ItemGroup>
 
 	<ItemGroup>
