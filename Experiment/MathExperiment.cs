@@ -1,118 +1,44 @@
 ﻿using Azure.AI.OpenAI;
-using InferenceTuning.Contract;
-using Microsoft.ML;
-using Microsoft.ML.AutoML;
-using Microsoft.ML.Data;
 using Microsoft.ML.SearchSpace;
+using Microsoft.ML;
 using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Microsoft.ML.Data;
+using System.Text.Json.Serialization;
 
-namespace InferenceTuning
+namespace InferenceTuning.Experiment
 {
-    public class AutoLLM
+    internal class MathExperiment
     {
-        private Func<MLContext, IDataView, double> _evaluatorFunc;
-        private Func<MLContext, IEnumerable<object>, Parameter, IEstimator<ITransformer>> _pipelineFunc;
-        private IEnumerable<object> _examples;
-        private MLContext _context;
-        private Random _random = new Random();
-        private SearchSpace _searchSpace;
-
-        public AutoLLM(MLContext context)
-        {
-            _context = context;
-        }
-
-        public AutoLLM SetEvaluator(Func<MLContext, IDataView, double> evaluator)
-        {
-            _evaluatorFunc = evaluator;
-
-            return this;
-        }
-
-        public AutoLLM SetPipeline<TExample, TOption>(Func<MLContext, IEnumerable<TExample>, TOption, IEstimator<ITransformer>> func, IEnumerable<TExample> examples, SearchSpace<TOption> searchSpace)
-            where TOption : class, new()
-        {
-            var option = searchSpace.SampleFromFeatureSpace(searchSpace.Default);
-            _pipelineFunc = (context, objs, option) => func(context, objs.Cast<TExample>(), option.AsType<TOption>());
-            _examples = examples.Select(x => (object)x!);
-            _searchSpace = searchSpace;
-
-            return this;
-        }
-
-        public ITransformer Fit(IDataView trainSet, IDataView validationSet)
-        {
-            // stage 1. select examples.
-            // for now, just randomly select N examples.
-            var selectedExamples = new List<object>();
-            var exampleCount = _examples.Count();
-            var defaultParameter = _searchSpace.SampleFromFeatureSpace(_searchSpace.Default);
-            var bestScore = double.MinValue;
-            for (int i = 0; i <= Math.Sqrt(exampleCount); ++i)
-            {
-                var examplesToPick = _random.Next(1, exampleCount);
-                var pickedExamples = _examples.OrderBy(x => _random.Next()).Take(examplesToPick).ToArray();
-                Log.Debug($"Select examples: {JsonSerializer.Serialize(pickedExamples)}");
-                var pipeline = _pipelineFunc(_context, pickedExamples, defaultParameter);
-                var model = pipeline.Fit(trainSet);
-                var eval = model.Transform(validationSet);
-                var score = _evaluatorFunc(_context, eval);
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    selectedExamples = pickedExamples.ToList();
-                }
-            }
-
-            Log.Information($"Best score after example selection: {bestScore}");
-            Log.Information($"Best examples: {JsonSerializer.Serialize(selectedExamples)}");
-
-
-            // stage 2. Inference parameter tuning.
-            var autoML = _context.Auto().CreateExperiment();
-            var trialRunner = new AutoLLMInferenceParameterTrialRunner(
-                _context,
-                trainSet,
-                validationSet,
-                _evaluatorFunc,
-                (context, parameter) => _pipelineFunc(context, selectedExamples, parameter));
-            autoML.SetTrialRunner(trialRunner)
-                  .SetCostFrugalTuner()
-                  .AddSearchSpace("llm", _searchSpace)
-                  .SetMaxModelToExplore(10);
-
-            var result = autoML.Run();
-            Log.Information($"Best score after inference parameter tuning: {result.Metric}");
-            return result.Model;
-        }
-
-        public async static Task Example1()
+        public async static Task RunAsync()
         {
             var context = new MLContext();
-            string level = "Level 4";
+            string level = "Level 3";
             // setup log
             Log.Logger = new LoggerConfiguration()
                             .MinimumLevel.Debug()
                             .WriteTo.Console()
-                            .WriteTo.File($@"C:\Users\xiaoyuz\source\repos\InferenceTuning\{level}_.txt", rollingInterval: RollingInterval.Day)
+                            .WriteTo.File($@"C:\Users\xiaoyuz\source\repos\InferenceTuning\Logs\{level}_.txt", rollingInterval: RollingInterval.Day)
                             .CreateLogger();
 
             Log.Information("Start Experiment");
             IEnumerable<MathInput> trainSet = Directory.GetFiles("Math/train", "*.json", SearchOption.AllDirectories)
-                .Select(file => JsonSerializer.Deserialize<MathInput>(File.ReadAllText(file))!);
+                .Select(file => JsonSerializer.Deserialize<MathInput>(File.ReadAllText(file))!)
+                .Where(x => x.Level == level);
 
             IEnumerable<MathInput> testSet = Directory.GetFiles("Math/test", "*.json", SearchOption.AllDirectories)
-                .Select(file => JsonSerializer.Deserialize<MathInput>(File.ReadAllText(file))!);
+                .Select(file => JsonSerializer.Deserialize<MathInput>(File.ReadAllText(file))!)
+                .Where(x => x.Level == level);
 
-            var key = "574924ad8a6c425eaa6f2fc9c45fc00e";
-            var endpoint = "https://cog-avxpgc4w6gie6.openai.azure.com/";
+            var key = "your token";
+            var endpoint = "your endpoint here";
             var gptClient = new OpenAIClient(new Uri(endpoint), new Azure.AzureKeyCredential(key));
             var defaultOption = new GPTInferenceOption
             {
@@ -122,8 +48,7 @@ namespace InferenceTuning
             };
             var examples = CreateMathSolutionExample();
             var searchSpace = new SearchSpace<GPTInferenceOption>(defaultOption);
-            var autoLLM = new AutoLLM(context);
-            autoLLM.SetPipeline((context, examples, option) =>
+            Func<MLContext, IEnumerable<object>, GPTInferenceOption, IEstimator<ITransformer>> pipeline = (context, examples, option) =>
             {
                 return context.Transforms.CreateFewshotPromptTemplate(
                 promptTempate: @"
@@ -142,13 +67,12 @@ response(in json):
     ""simplifiedSolution"":""${simplifiedSolution}""
 }
 ",
-                inputColumnNames: new[] { "question" },
+                inputColumnNames: new[] { "problem" },
                 outputColumnName: "prompt",
                 exampleVariableName: "Example",
                 examples.ToArray())
                 .Append(context.Transforms.GPT3_5(gptClient, option));
-            }, examples, searchSpace);
-
+            };
             Func<MLContext, IDataView, double> evaluator = (context, eval) =>
             {
                 var responses = eval.GetColumn<string[]>("Responses");
@@ -160,9 +84,13 @@ response(in json):
                     var candidate = new List<string>();
                     foreach (var response in x)
                     {
+                        var sanitizedresponse = response.Replace("\r", "").Replace("\n", "").Replace("\\", "");
                         try
                         {
-                            var json = JsonSerializer.Deserialize<Dictionary<string, string>>(response);
+                            var json = JsonSerializer.Deserialize<Dictionary<string, string>>(sanitizedresponse, new JsonSerializerOptions
+                            {
+                                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                            });
                             if (json?.TryGetValue("simplifiedSolution", out var simplifiedSolution) is true)
                             {
                                 candidate.Add(simplifiedSolution);
@@ -170,7 +98,7 @@ response(in json):
                         }
                         catch (Exception)
                         {
-                            Log.Warning("Failed to parse response: {response}", response);
+                            Log.Warning("Failed to parse response: {sanitizedresponse}", sanitizedresponse);
                         }
                     }
 
@@ -207,7 +135,8 @@ Resposne: ${response}
                 examples: evaluationExamples)
                 .Append(context.Transforms.GPT3_5(gptClient, evaluationOption));
 
-                var input = context.Data.LoadFromEnumerable(Enumerable.Zip(actualSolutions, candidates)
+                var zip = Enumerable.Zip(actualSolutions, candidates);
+                var input = context.Data.LoadFromEnumerable(zip
                      .Select(x => new MathInput
                      {
                          Actual = x.First,
@@ -220,21 +149,58 @@ Resposne: ${response}
                 var correctLine = evaluationResult.GetColumn<string[]>("Responses").Select(x => x.First())
                     .Where(x => x.ToLower().Contains("true")).Count();
                 var response = evaluationResult.GetColumn<string[]>("Responses").Select(x => x.First()).ToArray();
+
                 var tokens = evaluationResult.GetColumn<int>("Tokens");
                 Log.Information($"Correct: {correctLine}/{totolLine}", correctLine, totolLine);
                 Log.Information($"Raw Response: {string.Join("\n", response)}");
+                foreach (var z in zip)
+                {
+                    Log.Information($"Actual: {z.First} Candidates: [{string.Join(",", z.Second)}]");
+                }
                 Log.Information($"Tokens usage in total: {tokens.Sum()}");
                 return (double)correctLine / totolLine;
             };
 
+            var trainDataset = context.Data.LoadFromEnumerable(trainSet.Take(20));
+            var validDataset = context.Data.LoadFromEnumerable(trainSet.Skip(100).Take(10));
+            var testDataset = context.Data.LoadFromEnumerable(testSet.Take(200));
+
+            var defaultPipeline = pipeline(context, CreateMathSolutionExample().Take(1), defaultOption);
+            var defaultModel = defaultPipeline.Fit(context.Data.LoadFromEnumerable(trainSet.Take(20)));
+            var eval = defaultModel.Transform(testDataset);
+            var defaultScore = evaluator(context, eval);
+            Log.Information($"Score on test dataset with default option and one example: {defaultScore}");
+
+            var fewshotPipeline = pipeline(context, CreateMathSolutionExample(), defaultOption);
+            var fewshotModel = fewshotPipeline.Fit(context.Data.LoadFromEnumerable(trainSet.Take(20)));
+            var fewshotResult = fewshotModel.Transform(testDataset);
+            var fewshotScore = evaluator(context, fewshotResult);
+            Log.Information($"Score on test dataset with default option and all examples: {fewshotScore}");
+
+            var inferenceTuneLLM = new AutoLLM(context);
+            inferenceTuneLLM.SetPipeline(pipeline, examples.Take(1), searchSpace);
+            inferenceTuneLLM.SetEvaluator(evaluator);
+            var inferenceTuneModel = inferenceTuneLLM.Fit(trainDataset, validDataset);
+            var inferenceTuneResult = inferenceTuneModel.Transform(testDataset);
+            var inferenceTuneScore = evaluator(context, inferenceTuneResult);
+            Log.Information($"Score on test dataset with inference tuning and one example: {inferenceTuneScore}");
+
+            var fewshoLLM = new AutoLLM(context, false);
+            fewshoLLM.SetPipeline(pipeline, examples.Take(1), searchSpace);
+            fewshoLLM.SetEvaluator(evaluator);
+            var fewshotSelectionModel = fewshoLLM.Fit(trainDataset, validDataset);
+            var fewshotEval = fewshotSelectionModel.Transform(testDataset);
+            var fewshoScore = evaluator(context, fewshotEval);
+            Log.Information($"Score on test dataset with default option and example selection: {fewshoScore}");
+
+            var autoLLM = new AutoLLM(context);
+            autoLLM.SetPipeline(pipeline, examples, searchSpace);
             autoLLM.SetEvaluator(evaluator);
-
-            var model = autoLLM.Fit(context.Data.LoadFromEnumerable(trainSet.Take(20)), context.Data.LoadFromEnumerable(trainSet.Skip(10).Take(10)));
-            var result = model.Transform(context.Data.LoadFromEnumerable(testSet.Take(20)));
+            var model = autoLLM.Fit(trainDataset, validDataset);
+            var result = model.Transform(testDataset);
             var score = evaluator(context, result);
-            Log.Information($"Score on test dataset: {score}");
+            Log.Information($"Score on test dataset with inference tuning and example selection: {score}");
         }
-
         public static object[] CreateMathSolutionExample()
         {
             return new[]
@@ -308,5 +274,32 @@ Resposne: ${response}
                 },
             };
         }
+
+        public class MathInput
+        {
+            [ColumnName("problem")]
+            [JsonPropertyName("problem")]
+            public string Problem { get; set; }
+
+            [ColumnName("level")]
+            [JsonPropertyName("level")]
+            public string Level { get; set; }
+
+            [ColumnName("type")]
+            [JsonPropertyName("type")]
+            public string Type { get; set; }
+
+            [ColumnName("solution")]
+            [JsonPropertyName("solution")]
+            public string Solution { get; set; }
+
+            [ColumnName("actual")]
+            [JsonPropertyName("actual")]
+            public string Actual { get; set; }
+
+            [ColumnName("candidates")]
+            [JsonPropertyName("candidates")]
+            public string[] Candidates { get; set; }
+        }   
     }
 }

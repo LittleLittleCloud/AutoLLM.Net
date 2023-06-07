@@ -17,11 +17,4 @@ namespace InferenceTuning.Contract
 
         public int Tokens { get; set; }
     }
-
-    public class MathOutputs
-    {
-        public string[] Answers { get; set; }
-
-        public string[] Thoughts { get; set; }
-    }
 }
