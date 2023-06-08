@@ -97,6 +97,9 @@ response
 ## Case study
 ### [Math](https://arxiv.org/abs/2103.03874)
 Use LLM to resolve math problems. Input is problem and output is answer inside \\box{}. Evaluate metric is accuracy. Code is [here](./Experiment/MathExperiment.cs)
+
+NOTE: this study is enlighten by this original post: [LLM-tuning-math](https://microsoft.github.io/FLAML/blog/2023/04/21/LLM-tuning-math)
+
 #### Settings
 - LLM Model: GPT3.5 turbo
 - number of example candidates: 6
