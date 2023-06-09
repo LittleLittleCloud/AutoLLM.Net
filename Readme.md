@@ -94,8 +94,22 @@ response
 */
 ```
 
+## How to run
+### [Case study - Math](#math)
+#### Prerequisit
+- access to GPT3.5 on Azure OpenAI service
+#### Steps
+- Clone this project
+- Set up the `key` and `endpoint` in [MathExperiment.cs](.\Experiment\MathExperiment.cs). This will be used to make LLM calls.
+- Set up the difficult level of math problems you want to run. The support levels are `level 1`, `level 2`, `level 3`, `level 4` and `level 5`
+- Start `MathExperiment` In [Program.cs](./Program.cs) by
+```csharp
+await MathExperiment.RunAsync()
+```
+- Run this project
+
 ## Case study
-### [Math](https://arxiv.org/abs/2103.03874)
+### Math
 Use LLM to resolve math problems. Input is problem and output is answer inside \\box{}. Evaluate metric is accuracy. Code is [here](./Experiment/MathExperiment.cs)
 
 NOTE: this study is enlighten by this original post: [LLM-tuning-math](https://microsoft.github.io/FLAML/blog/2023/04/21/LLM-tuning-math)
