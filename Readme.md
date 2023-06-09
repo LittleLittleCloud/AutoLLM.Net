@@ -99,6 +99,7 @@ response
 Use LLM to resolve math problems. Input is problem and output is answer inside \\box{}. Evaluate metric is accuracy. Code is [here](./Experiment/MathExperiment.cs)
 
 NOTE: this study is enlighten by this original post: [LLM-tuning-math](https://microsoft.github.io/FLAML/blog/2023/04/21/LLM-tuning-math)
+
 NOTE: the accuracy here is just for reference as we we use GPT3.5 to evaluate if the answer is correct and we notice that sometimes GPT3.5 mistakenly mark wrong answer as correct. So accuracy might be lower than what the table present.
 #### Settings
 - LLM Model: GPT3.5 turbo
